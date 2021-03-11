@@ -7,9 +7,14 @@ from scenarioVariables import c, xLim, yLim, zLim, timestep, dissipation_density
 
 
 
+
 @jit(nopython=True)
-def jitTilHit(planesCoordinates, planesDirection, initialCoordinates, initialDirection):
+def jitTilHit(planesCoordinates, planesDirection, initialCoordinates, initialDirection, discrete=True):
     global c, xLim, yLim, zLim, timestep, dissipation_density
+    probabilisticSurvivalValue = 1.0
+    position = initialCoordinates;
+    direction = initialDirection;
+
 
     def dotProd(a, b):
         return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
@@ -23,35 +28,33 @@ def jitTilHit(planesCoordinates, planesDirection, initialCoordinates, initialDir
         isEnclosed &= zLim[0] <= position[2] <= zLim[1]
         return isEnclosed
 
-    def planePhotonCollision(planePosition, photonPosition, planeDirection, photonDirection):
-        position = photonPosition.copy()
-        initialRelativePos = D3Difference(position, planePosition)
-        position[0] += photonDirection[0] * c * timestep
-        position[1] += photonDirection[1] * c * timestep
-        position[2] += photonDirection[2] * c * timestep
-        finalRelativePos = D3Difference(position, planePosition)
+    initialRelativeZSigns = [dotProd(D3Difference(position, planePosition), planeDirection) > 0 for
+                             planePosition, planeDirection in zip(planesCoordinates, planesDirection)]
+    planesAmt = len(planesCoordinates)
 
-        initialZProjection = dotProd(initialRelativePos, planeDirection)
-        finalZProjection = dotProd(finalRelativePos, planeDirection)
-        return initialZProjection * finalZProjection <= 0
+    def planePhotonCollision(index):
+        finalRelativePos = D3Difference(position, planesCoordinates[index])
+        finalZSign = dotProd(finalRelativePos, planesDirection[index]) > 0
+        return initialRelativeZSigns[index] != finalZSign
 
 
-    position = initialCoordinates;
-    direction = initialDirection;
+
+
     while(True):
-        if not enclosed(position):
-            return (False, position)
 
         dissipation_value = dissipation_density(position[0], position[1], position[2])
-        if random.random() < dissipation_value:
-            return (False, position)
+        if(discrete):
+            if random.random() < dissipation_value:
+                return (False, position, 0.0)
+        else:
+            probabilisticSurvivalValue *= (1-dissipation_value)
 
+        for index in range(planesAmt):
+            if(planePhotonCollision(index)):
+                return (True, position, probabilisticSurvivalValue)
 
-        for planeCoordinates, planeDirection in zip(planesCoordinates, planesDirection):
-            if(planePhotonCollision(planeCoordinates, position,
-                                    planeDirection, direction)):
-                #undo ett step fordi jit handler med referanser
-                return (True, position)
+        if not enclosed(position):
+            return (False, position, probabilisticSurvivalValue)
 
         position[0] += direction[0] * c * timestep
         position[1] += direction[1] * c * timestep
