@@ -1,0 +1,97 @@
+#første kulepunkt problem 2
+
+bone = "bone.txt"
+tissue = "tissue.txt"
+rhoBone = 1.92
+rhoTissue = 1.02
+
+def readFromFile(filename):
+    file = open(filename, "r")
+    val1 = np.array(0); val2 = np.array(0)
+    for n in file:
+        myList = n.split(", ")
+        val1 = np.append(val1, float(myList[0])); val2 = np.append(val2, float(myList[1]))
+    return val1[1:], val2[1:]
+
+boneVal = readFromFile(bone)
+tissueVal = readFromFile(tissue)
+
+def plotConstRho():
+    plt.figure(figsize=(12,4))
+    plt.suptitle(r"Plot of attenuation coefficient $\mu$ as a function of photon energy $E$ for soft tissue and bone")
+    plt.xscale("log")
+    plt.yscale("log")
+    plt.xlabel(r"$E[keV]$")
+    plt.ylabel(r"$\mu[cm^{-1}]$")
+    plt.plot(boneVal[0]*10**3, boneVal[1] * rhoBone, label="Bone")
+    plt.plot(tissueVal[0]*10**3, tissueVal[1] * rhoTissue, label="Tissue")
+    plt.legend()
+    plt.show()
+    
+plotConstRho()
+
+#andre og tredje kulepunkt
+
+energies = boneVal[0][21:30]*1e3 #10 til 100 keV
+muBone = boneVal[1][21:30] * rhoBone #henter ut relevante mu som tilhører energi i intervallet 10 til 100 keV
+muTissue = tissueVal[1][21:30] * rhoTissue
+trajectory1 = np.arange(0, 3 + dx, dx) #brukt for 3cm tissue
+
+dx1 = 0.01
+tissue1 = np.arange(0, 1+dx, dx1)
+bone = np.arange(1, 2+dx, dx1)
+tissue2 = np.arange(2, 3+dx, dx1)
+
+
+def intensitiesTissue(numOfPhotons):
+    intensitiesTissue = np.array(0)
+    for i in range(len(energies)):
+        N = MonteCarlo(numOfPhotons, muTissue[i], trajectory1)[-1]
+        I = N*energies[i]
+        intensitiesTissue = np.append(intensitiesTissue, I)
+    return intensitiesTissue[1:]
+
+def intensitiesBone(numOfPhotons):
+    intensitiesBone = np.array(0)
+    for i in range(len(energies)):
+        N1 = MonteCarlo(numOfPhotons, muTissue[i], tissue1)[-1]
+        if(N1 > 0):
+            N2 = MonteCarlo(int(N1), muBone[i], bone)[-1]
+            if(N2 > 0):
+                N = MonteCarlo(int(N2), muTissue[i], tissue2)[-1]
+            else:
+                N = 0
+        else:
+            N=0
+        I = N*energies[i]
+        intensitiesBone = np.append(intensitiesBone, I)
+    return intensitiesBone[1:]
+
+I_tissue = intensitiesTissue(1000)
+I_tissueandbone = intensitiesBone(1000)
+                
+def prettyPlotIntensities(): 
+    plt.figure(figsize = (12,8))
+    plt.title("Intensities of beam at detector, N=1000")
+    plt.xlabel(r"$E$ [keV]")
+    plt.ylabel(r"I [kV]")
+    plt.plot(energies, I_tissue/10**3, color="blue", label = "3cm Tissue")
+    plt.plot(energies, I_tissueandbone/10**3, color = "red", label = "Tissue and bone")
+    plt.legend()
+    plt.show()
+    
+prettyPlotIntensities()
+
+#fjerde kulepunkt
+
+contrast = (I_tissue[1:]-I_tissueandbone[1:])/I_tissue[1:] #dropper første verdi, ettersom den er 0
+
+def prettyPlotContrast():
+    plt.figure(figsize=(12,8))
+    plt.title("Contrast as function of energy")
+    plt.xlabel(r"$E$ [keV]")
+    plt.ylabel("C")
+    plt.plot(energies[1:], contrast)
+    plt.show()
+    
+prettyPlotContrast()
