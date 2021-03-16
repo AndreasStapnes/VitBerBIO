@@ -5,10 +5,12 @@ timestep = 1e-11;                           #Definerer timestep
 c = 3e8                                     #Definerer lyshastighet
 
 
-pixelSize = 1 / 128;
+
 
 obj1_20kev = obj1_50kev = obj1_100kev = obj2_25kev = obj2_50kev = obj2_75kev = test_array = None
 #deklarerer alle objekt-array-ene
+
+defaultElementSize = 1 / 128;             #angir default-verdien i meter til lengden på ett element i hvert objekt
 
 loadlist = {"obj1_20kev":"object1_20keV.npy",
             "obj1_50kev":"object1_50keV.npy",

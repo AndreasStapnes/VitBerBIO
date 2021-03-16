@@ -3,36 +3,40 @@ from numba import jit
 import math
 import numpy as np
 import random
-from scenarioVariables import xLim, yLim, zLim, c, timestep, pixelSize
+from scenarioVariables import xLim, yLim, zLim, c, timestep, defaultElementSize
 
 class speedup: #En klasse kun for å innkapsle alle jit-funksjoner
     #Den inneholder to funksjoner (jitTilHit og dissipation) hvilket opprinnelig er definert som None.
 
 
-    jitTilHit = None  #Dette er hvor den 'ferdigkompilerte' jit-til-hit-funksjonen lagres
-    dissipation = None #Tilsvarende er dette hvor den kompilerte dissipation-funksjonen lagres
+    jitTilHit = None        #Dette er hvor den 'ferdigkompilerte' jit-til-hit-funksjonen lagres
+    dissipation = None      #Tilsvarende er dette hvor den kompilerte dissipation-funksjonen lagres
     #Begge disse to vil aksesseres fra utenfor klassen
 
     # Dette blir cls.jitTilHit i klassefunksjonene definert i speedup. cls vider kun til klassen
 
     @classmethod
-    def reloadDissipation(cls, box):
+    def reloadDissipation(cls, box, elementSize = defaultElementSize):
         # Når man kjører reloadDissipation med et spesifisert system (f.eks obj1_20kev) som box, vil dissipation
         #variabelen i speedup bli en jit-akselerert funksjon som kan kalles videre, for å finne dissiperingsverdien i et gitt punkt.
         #Alt denne funksjonen (reloadDIssipation) gjør er å re-kjøre kompilasjonen (som man ville gjort når man laster inn et nytt system)
         #Denne funksjonen er ikke brukt andre steder enn i reloadJit.
 
-        global pixelSize, c, timestep #Henter aktuelle globale variabler
-        #pixelSize er lengden på en 'pixel' eller 'index' i systemet box.
-        #Dersom box er 128x128x13 og pixelSize = 1/128, vil boksen ha dimensjoner 1mx1mx(13/128)m
+        # elementSize er lengden på en 'pixel' eller 'index' i systemet box.
+        # Dersom box er 128x128x13 og elementSize = 1/128, vil boksen ha dimensjoner 1mx1mx(13/128)m
+
+        global c, timestep #Henter aktuelle globale variabler
+
+
+
 
         xlen, ylen, zlen = np.shape(box) #Henter ut dimensjonene til boksen
 
         @jit(nopython=True)
         def attenuation(x, y, z):
-            xind = int(math.floor(x / pixelSize)) + xlen // 2   #Beregner her en (integer) x,y og z-index for et (float) x,y,z-koordinat
-            yind = int(math.floor(y / pixelSize)) + ylen // 2   #Dette gjøres slik at koordinatene (0,0,0) ligger får index i system-boksens midtpunkt (xlen//2, ylen//2, zlen//2)
-            zind = int(math.floor(z / pixelSize)) + zlen // 2
+            xind = int(math.floor(x / elementSize)) + xlen // 2   #Beregner her en (integer) x,y og z-index for et (float) x,y,z-koordinat
+            yind = int(math.floor(y / elementSize)) + ylen // 2   #Dette gjøres slik at koordinatene (0,0,0) ligger får index i system-boksens midtpunkt (xlen//2, ylen//2, zlen//2)
+            zind = int(math.floor(z / elementSize)) + zlen // 2
             if (0 <= xind < xlen and 0 <= yind < ylen and 0 <= zind < zlen):
                 return box[xind, yind, zind]
             return 0
@@ -46,12 +50,15 @@ class speedup: #En klasse kun for å innkapsle alle jit-funksjoner
 
 
     @classmethod
-    def reloadJit(cls, box):
+    def reloadJit(cls, box, elementSize=defaultElementSize):
         #Denne funkjsonen kjører man når man vil laste inn et nytt system (en ny numpy-matrise av attenuasjonskoeffisienter)
         #Dersom den aktuelle numpy-matrisen sendes inn som box, vil jitTilHit i speedup redefineres til å simulere ett
         #foton som forflyttes i det nevnte systemet. (Fotonet henter da dissipasjonsverdier fra det nye systemet)
 
-        cls.reloadDissipation(box)      #Definerer først de nye dissipasjonsverdiene
+        #elementSize angir størrelsen til hvert element i box.
+        #elementSize brukes kun i reloadDissipation. For en bedre forklaring på denne variabelen, les beskrivelsen der.
+
+        cls.reloadDissipation(box, elementSize)      #Definerer først de nye dissipasjonsverdiene
         dissipation = cls.dissipation   #Og henter disse inn i en lokal dissipation-variabel
         global c, xLim, yLim, zLim, timestep #Henter ut scenario-verdier fra globalt skop
 
