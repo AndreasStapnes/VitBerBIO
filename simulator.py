@@ -9,7 +9,7 @@ Created on Wed Feb 24 11:04:37 2021
 import numpy as np
 
 from jitSpeedup import speedup
-from scenarioVariables import xLim, yLim, zLim, c, timestep
+from scenarioVariables import xLim, yLim, zLim, lengthStep
 
 from numba.typed import List
 
@@ -41,13 +41,14 @@ class plane:
         '''
        Plan-klasse
        Kan opprette plan-instanser der en ønsker å absorbere og/eller markere passerende fotoner.
-        :param location: posisjonen til planet. Markerer også punktet (0,0) i planets egne (todimensjonale) koordinatsystem
+        :param location: posisjonen til planet. Angir også punktet (0,0) i planets egne (todimensjonale) koordinatsystem
         :param direction: Normalvektoren til planet (kan settes til None dersom man oppgir egen basis)
 
         :param kwargs: Valgfrie spesifikasjoner {
             basis <- (ferdiggenerert ortogonal enhetsbasis på form (xi,eta,zeta)). xi og eta spenner planet, og zeta er planets normalvektor
             opacity <- ("transparent" eller "opaque"). Angir om planet tillater at fotoner krysser uten å bli absorbert. Opaque absorberer fotoner.
             marker <- (True eller False). Angir om planet lagrer en liste skjæringspunkter (angitt i (xi,eta)-koordinater) for hvert skjærende foton
+                        Disse lagres i så tilfelle i instansens .markings liste
         }
         '''
         normal = normalize(direction)
@@ -60,16 +61,16 @@ class plane:
         #Defaultverdi for opacity er "opaque" == absorberende plan
         #Indekserer en dictionary slik at "transparent" gir self.transparent=1 og "opaque" gir self.transparent=0
 
-        self.marker = kwargs.get("marker", True) #Angir om planet skal markere skjærende fotoner
-        self.location = location #Planets origo-posisjon
-        self.markings = [] #Alle markerte fotoner
+        self.marker = kwargs.get("marker", True)        #Angir om planet skal markere skjærende fotoner
+        self.location = location                        #Planets origo-posisjon
+        self.markings = []                              #Liste av alle markerte fotoner
 
 
     #Det samme som operator<=, slik at plan.__le__(foton) er det samme som plan<=foton
     def __le__(self, photon):       #Sjekker om fotonet nettop skar gjennom et plan (forrige timestep)
         relativeLocationFinal = photon.location - self.location
         zetaCoordinateFinal = dotProd(relativeLocationFinal, self.zeta)             #Beregner zeta-koordinat i planets egen basis etter antatt skjæring
-        relativeLocationPrevious = photon.propagate(-c*timestep) - self.location    #Går ett tidssteg tilbake
+        relativeLocationPrevious = photon.propagate(-lengthStep) - self.location    #Går ett tidssteg tilbake
         zetaCoordinatePrevious = dotProd(relativeLocationPrevious, self.zeta)       #Beregner zeta-koordinat i planets egen basis før antatt skjæring
         return np.sign(zetaCoordinatePrevious) != np.sign(zetaCoordinateFinal)      #Sjekker om zeta-koordinatet endret fortegn
         #Returnerer sann dersom fortegnet til zeta-koordinatet endret
@@ -98,8 +99,12 @@ class plane:
         #Sannhetsverdien til plan<foton angir om fotonet absorberes. plan < foton legger til fotonets projeksjon i det aktuelle planet sine 'markings'.
 
 
-class photonSource():
+class photonSource(plane):                                      #photonSource er en subklasse av plane
     def __init__(self, location, direction, **kwargs):
+        super().__init__(location, direction, marker=False, opacity="transparent", **kwargs) #Arver fra superklassen plane
+                                                                #Planet settes til å være et ikkemarkerende gjennomsiktig plan (det ignorerer alle passerende fotoner)
+                                                                #Dessuten legges det aldri til i photons.planes slik at dette planet ikke er relevant under foton-avfyring
+                                                                #Det er i grunnen bare basis-definisjonen som arves fra plane
         '''
             foton kilde-klasse
                 Skaper plan som emmiterer fotoner i retning av planets normalvektor.
@@ -110,90 +115,99 @@ class photonSource():
 
             :param location: Angir origo for det foton-emmiterende planet
             :param direction: Angir normalvektoren og foton-retningen for det emmiterende planet. (Kan settes til none dersom en basis er spesifisert i kwargs)
+            
             :param kwargs: Valgfrie parametre {
-            basis <- (ferdiggenerert ortogonal enhetsbasis på form (xi,eta,zeta)).
+            basis (arvet fra plane) <- (ferdiggenerert ortogonal enhetsbasis på form (xi,eta,zeta)).
                         xi og eta spenner ut det emmiterende planet. zeta er planets normalvektor, og angir retningen til emmiterte fotoner
-            xiActiveArea <- (2-tuppel (xi_minimum, xi_maximum)) som angir xi-koordinatene hvor det skal emmiteres fotoner. default=[-1,1]
-            etaActiveArea <- (2-tuppel (eta_minimum, eta_maximum)) som angir eta-koordinatene hvor det skal emmiteres fotoner. default=[-1,1]
             }
 
             '''
-        normal = normalize(direction)
-        self.location = location
-        if("basis" in kwargs): #Genererer basis som før
-            self.xi, self.eta, self.zeta = kwargs["basis"]
-        else:
-            self.zeta, self.xi, self.eta = generateUnitBasis(normal)
-        self.xiActiveArea = kwargs.get("xiActiveArea", [-1,1]) #Henter ut xiActiveArea
-        self.etaActiveArea = kwargs.get("etaActiveArea", [-1,1])
+
+
 
     def generatePhotons(self, **kwargs):
         '''
-        Genererer fotoner som angitt i __init__ og avfyrer disse i zeta-retning
+        Genererer fotoner i planet angitt i __init__ og avfyrer disse i zeta-retning
 
         :param kwargs: Valgfrie parametre {
-        random <- (True eller False) Angir om foton-emisjonene skal skje tilfeldig i planets emmiterende område (for hvert foton velges en tilfeldig posisjon)
-                        Hvis False genereres ekvidistante fotoner i emmisjonsplanet utspent av xi og eta-vektorene i basisen
-                        Fordelingen skjer rektangulært (som piksler på en skjerm) med nabo-foton-emisjonspunkt-avstand 1/dpm (se dpm)
+        random <- (True eller False) True: Angir om foton-emisjonene skal skje tilfeldig i planets emmiterende område (for hvert foton velges en tilfeldig posisjon)
+                        False: fotoner genereres ut fra et forhåndsspesifisert sett med xi- og eta-koordinater. Se (xi/eta)EmissionCoordinates.
 
-            discreteFotons <- (True eller False). Kun aktuelt dersom random=False
+
+
+
+            Kun aktuelt dersom random=False-----------------------------------------------------------------
+
+            discreteFotons <- (True eller False).
                         Angir om de genererte fotonene er diskrete (vil enten absorberes eller ikke i hvert tidssteg) eller
                         baserer seg på en statistisk overlevelses-rate-variabel (kan kun absorberes ved plan).
                         Dersom False vil generatePhotons returnere en 2d-matrise med overlevelses-ratene
                         for hvert foton ved deres forste plan-kollisjon / ved forlatelse av lovlig område. default=True
 
-            dpm <- (float) Kun aktuelt dersom random=False.
-                        dotsPerMeter angir antall fotoner per meter, slik at 1/dpm er avstanden mellom fotonemmisjons-punkter. default=128
+            xiEmissionCoordinates <- (liste av floats)
+                        liste av xi-koordinater hvor det skal avfyres ikkediskrete fotoner. Default = []
+            etaEmissionCoordinates <- (liste av floats)
+                        liste av eta-koordinater hvor det skal avfyres ikkediskrete fotoner. Default = []
 
-            amount <- (int) Kun aktuelt dersom random=True .
+
+
+
+            Kun aktuelt dersom random=True------------------------------------------------------------------
+
+            amount <- (int)
                         Angir antall fotoner som skal emmiteres totalt
+            xiActiveArea <- (2-tuppel (xi_minimum, xi_maximum))
+                        Angir xi-koordinatene hvor det skal emmiteres fotoner. default=[-1,1]
+            etaActiveArea <- (2-tuppel (eta_minimum, eta_maximum))
+                        Angir eta-koordinatene hvor det skal emmiteres fotoner. default=[-1,1]
         }
 
         :return: (None) dersom discreteFotons = True
-                (2d numpy-array av floats) som beskriver de statistiske overlevelses-ratene for hvert foton ved plan-absorpsjon
+                (numpy-array av floats) som beskriver de statistiske overlevelses-ratene for hvert foton ved plan-absorpsjon
                 dersom discreteFotons=False
         '''
+
         random = kwargs.get("random", True)                     #Henter random fra valgfrie variabler
-        xiLen = self.xiActiveArea[1]-self.xiActiveArea[0]       #Henter xi-lengde for emmisjonsintervall
-        xiNought = self.xiActiveArea[0]                         #Henter minste tillatte xi-koordinat i emmisjonsintervall
-        etaLen = self.etaActiveArea[1]-self.etaActiveArea[0]    #Henter eta-lengde for emmisjonsintervall
-        etaNought = self.etaActiveArea[0]                       #Henter minste tillatte eta-koordinat i emmisjonsintervall
+
+
+
 
         if (random):                                                    #Dersom tilfeldig fordeling
+            self.xiActiveArea = kwargs.get("xiActiveArea", [-1, 1])     #Henter ut xiActiveArea, xi-intervallet hvor fotoner genereres
+            self.etaActiveArea = kwargs.get("etaActiveArea", [-1, 1])   #^^ men bare for eta
+
+            xiLen = self.xiActiveArea[1] - self.xiActiveArea[0]         # Henter xi-lengde for emmisjonsintervall
+            xiNought = self.xiActiveArea[0]                             # Henter minste tillatte xi-koordinat i emmisjonsintervall
+            etaLen = self.etaActiveArea[1] - self.etaActiveArea[0]      # Henter eta-lengde for emmisjonsintervall
+            etaNought = self.etaActiveArea[0]                           # Henter minste tillatte eta-koordinat i emmisjonsintervall
+
             amount = kwargs.get("amount")                               #Antall fotoner må være spesifisert dersom tilfeldig fordeling
             for i in range(amount): #I random må fotonene være diskrete (de kan enten fortsette med survivalRate 1 eller umiddelbart opphøre med survivalRate 0 i hver tidssteg)
                 xiRand = np.random.random()*xiLen + xiNought            #velger et tilfeldig koordinat i det utspente photonGenerator-planet
                 etaRand = np.random.random()*etaLen + etaNought         #^^ bare for eta
 
                 pos = self.location + self.xi * xiRand + self.eta * etaRand #Danner det tilfeldige punktet
-                ph = photon(pos, self.zeta) #Skaper fotonet i dette punktet, rettet normalt med planet
-                ph.jitPrimer() #Avfyrer fotonet
-                return None #Ingenting aktuelt å returnere
+                ph = photon(pos, self.zeta)                             #Skaper fotonet i dette punktet, rettet normalt med planet
+                ph.jitPrimer()                                          #Avfyrer fotonet. Lagrer ingen verdier, kun foton-skjæring av plan lagres
+                return None                                             #Ingenting aktuelt å returnere
 
-        else: #Dersom jevn fordeling av fotoner
+        else:                                                           #Dersom random==False brukes forhåndsbestemt fordeling av fotoner (angitt som et sett xi og eta-koordinater)
             discrete = kwargs.get("discretePhotons", True)
-            dpm = kwargs.get("dpm", 128)
-            def approxDiscretize(start, end, dpm):  #Diskretiserer et intervall slik du ville med piksler, dvs, linspace bare der det er et halvt step fra hver side til første/siste punkt
-                length = end - start                # Årsaken til dette er at man ønsker hver hver 'pixel' skal være representert av et foton gjennom sitt senter.
-                totPts = round(dpm * length)        # Dvs for xi-intervall [0,2] og dpm=1 vil det genereres fotoner i 0.5 & 1.5, som farger piksler med utstrekning [0,1] & [1,2].
-                stepLen = length/totPts
-                return np.linspace(start+stepLen/2, end-stepLen/2, totPts)  #Koden her er relativt selvforklarende
+            xiEmissionCoordinates = kwargs.get("xiEmissionCoordinates", np.array([]))       #Henter ut listen xi-koordinater for hvert foton
+            etaEmissionCoordinates = kwargs.get("etaEmissionCoordinates", np.array([]))     #Tilsvarende som ^^ for eta
 
-                         #kort om unpack: *self.xiActiveArea === self.xiActiveArea[0], self.xiActiveArea[1]
-            xiDiscretePoints = approxDiscretize(*self.xiActiveArea, dpm)    #Finner xi foton-avfyrings-koordinater
-            etaDiscretePoints = approxDiscretize(*self.etaActiveArea, dpm)  #Finner eta foton-avfyrings-koordinater
-            xiAmt = len(xiDiscretePoints); etaAmt = len(etaDiscretePoints)  #Henter antall koordinater i xi og eta-retning
-            probabilisticSurvivalRates = np.zeros((xiAmt, etaAmt))          #Skaper en numpy-matrise en ønsker å lagre alle overlevelses-ratene i
-            for xiIndex in range(xiAmt):
-                for etaIndex in range(etaAmt):
-                    xiCrd = xiDiscretePoints[xiIndex]                           #Finner xi-koordinat for et gitt foton
-                    etaCrd = etaDiscretePoints[etaIndex]                        #Finner eta-koordinat fot et gitt foton
-                    pos = self.location + self.xi * xiCrd + self.eta * etaCrd   #Finner (x,y,z) posisjonen til fotonet med xi-eta-indexer xiIndex & etaIndex.
-                    ph = photon(pos, self.zeta, discrete)                       #Skaper fotonet
-                    throwawayLocation, probSurvivalRate = ph.jitPrimer()        #Avfyrer fotonet og henter ut probSurvivalRate.
-                                                                                #throwawayLocation må være tilstede for å hente verdier, men brukes ikke.
 
-                    probabilisticSurvivalRates[xiIndex,etaIndex] = probSurvivalRate #Lagrer overlevelsesraten
+            probabilisticSurvivalRates = np.zeros_like(xiEmissionCoordinates)           #Skaper en numpy-matrise en ønsker å lagre alle overlevelses-ratene i
+            totalPoints = len(xiEmissionCoordinates)                                    #Finner totalt antall punkter man avfyrer fotoner fra
+            for index in range(totalPoints):
+                xiCrd = xiEmissionCoordinates[index]
+                etaCrd = etaEmissionCoordinates[index]
+                pos = self.location + self.xi * xiCrd + self.eta * etaCrd   #Finner (x,y,z) posisjonen til fotonet som skal avfyres
+                ph = photon(pos, self.zeta, discrete)                       #Skaper fotonet
+                throwawayLocation, probSurvivalRate = ph.jitPrimer()        #Avfyrer fotonet og henter ut probSurvivalRate.
+                                                                            #throwawayLocation må være tilstede for å hente verdier, men brukes ikke.
+
+                probabilisticSurvivalRates[index] = probSurvivalRate        #Lagrer overlevelsesraten
 
             return probabilisticSurvivalRates                                   #Returnerer probsurvrates
 
@@ -228,7 +242,7 @@ class photon:
         self.direction = normalize(direction)       #Henter foton-retning
         self.discrete = discreteHits                #Angir hvorvidt fotonet er diskret
 
-    def propagate(self, distance=c*timestep):                   #Funksjon for å forflytte fotonet en gitt avstand. Dersom ingen avstand
+    def propagate(self, distance=lengthStep):                   #Funksjon for å forflytte fotonet en gitt avstand. Dersom ingen avstand
         return self.location + self.direction * distance        #spesifiseres, forflyttes det avstand tilsvarende lyshastighet i timestep tid
 
     def jitPrimer(self):                                        #Funksjon som forbereder fotonet for transmisjon, og deretter 'avfyrer' det.

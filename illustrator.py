@@ -8,20 +8,22 @@ from scenarioVariables import obj1_20kev, obj1_50kev, obj1_100kev, obj2_25kev, o
 from tqdm import tqdm, trange
 
 elementsZ = 60
-dotsPerElement = 2
+dotsPerElement = 1
 heightZ = 0.12
 elementSize = heightZ/elementsZ
 dotsZ = dotsPerElement * elementsZ
-dpm = dotsPerElement/elementSize
 
 fig, ax = plt.subplots(1,1)
 #ax.set_aspect("equal")
-xi = np.linspace(-heightZ/2,heightZ/2,dotsZ+1)
-eta = np.linspace(-heightZ/2,heightZ/2,dotsZ+1)
+xi, xiStep = np.linspace(-heightZ/2,heightZ/2,dotsZ+1, endpoint=False, retstep=True)
+eta, etaStep = np.linspace(-heightZ/2,heightZ/2,dotsZ+1, endpoint=False, retstep=True)
 xis, etas = np.meshgrid(xi, eta)
 zetas = np.zeros_like(xis)[:-1,:-1]
 dots = ax.pcolormesh(xis, etas ,zetas, shading="flat", norm=colors.Normalize(0,1))
 cb2 = fig.colorbar(dots)
+xis = np.ravel(xis[:-1,:-1] + xiStep/2); etas = np.ravel(etas[:-1,:-1] + etaStep/2)
+
+
 
 
 def init():
@@ -29,8 +31,9 @@ def init():
     return dots
 
 
-speedup.reloadJit(obj2_50kev.T, elementSize=elementSize)
-frames = 60
+
+speedup.reloadJit(obj2_50kev, elementSizes=[elementSize, elementSize, elementSize])
+frames = 10
 loopt = trange(frames)
 loop = iter(loopt)
 def prog(*args):
@@ -46,9 +49,9 @@ def expose(i):
     pl = plane(location=r, direction=normal, basis=basis, marker=False)
     photon.planes.append(pl);
     photon.updatePlanes()
-    phPl = photonSource(location=-r, direction=normal, basis=basis, xiActiveArea=[-heightZ/2,heightZ/2], etaActiveArea=[-heightZ/2,heightZ/2])
-    probabilityGrid = phPl.generatePhotons(random=False, dpm=dpm, discretePhotons=False)
-    dots.set_array(probabilityGrid.T.ravel())
+    phPl = photonSource(location=-r, direction=normal, basis=basis)
+    probabilityGrid = phPl.generatePhotons(random=False, discretePhotons=False, xiEmissionCoordinates=xis, etaEmissionCoordinates=etas)
+    dots.set_array(probabilityGrid)
     photon.planes.pop()
     del pl
     return dots

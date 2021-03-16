@@ -1,9 +1,10 @@
 
 from numba import jit
+from numba.typed import List
 import math
 import numpy as np
 import random
-from scenarioVariables import xLim, yLim, zLim, c, timestep, defaultElementSize
+from scenarioVariables import xLim, yLim, zLim, lengthStep, defaultElementSizes
 
 class speedup: #En klasse kun for å innkapsle alle jit-funksjoner
     #Den inneholder to funksjoner (jitTilHit og dissipation) hvilket opprinnelig er definert som None.
@@ -16,7 +17,7 @@ class speedup: #En klasse kun for å innkapsle alle jit-funksjoner
     # Dette blir cls.jitTilHit i klassefunksjonene definert i speedup. cls vider kun til klassen
 
     @classmethod
-    def reloadDissipation(cls, box, elementSize = defaultElementSize):
+    def reloadDissipation(cls, box, elementSizes = defaultElementSizes):
         # Når man kjører reloadDissipation med et spesifisert system (f.eks obj1_20kev) som box, vil dissipation
         #variabelen i speedup bli en jit-akselerert funksjon som kan kalles videre, for å finne dissiperingsverdien i et gitt punkt.
         #Alt denne funksjonen (reloadDIssipation) gjør er å re-kjøre kompilasjonen (som man ville gjort når man laster inn et nytt system)
@@ -24,8 +25,8 @@ class speedup: #En klasse kun for å innkapsle alle jit-funksjoner
 
         # elementSize er lengden på en 'pixel' eller 'index' i systemet box.
         # Dersom box er 128x128x13 og elementSize = 1/128, vil boksen ha dimensjoner 1mx1mx(13/128)m
-
-        global c, timestep #Henter aktuelle globale variabler
+        elementSizeX, elementSizeY, elementSizeZ = elementSizes
+        global lengthStep #Henter aktuelle globale variabler
 
 
 
@@ -34,33 +35,33 @@ class speedup: #En klasse kun for å innkapsle alle jit-funksjoner
 
         @jit(nopython=True)
         def attenuation(x, y, z):
-            xind = int(math.floor(x / elementSize)) + xlen // 2   #Beregner her en (integer) x,y og z-index for et (float) x,y,z-koordinat
-            yind = int(math.floor(y / elementSize)) + ylen // 2   #Dette gjøres slik at koordinatene (0,0,0) ligger får index i system-boksens midtpunkt (xlen//2, ylen//2, zlen//2)
-            zind = int(math.floor(z / elementSize)) + zlen // 2
+            xind = int(math.floor(x / elementSizeX)) + xlen // 2   #Beregner her en (integer) x,y og z-index for et (float) x,y,z-koordinat
+            yind = int(math.floor(y / elementSizeY)) + ylen // 2   #Dette gjøres slik at koordinatene (0,0,0) ligger får index i system-boksens midtpunkt (xlen//2, ylen//2, zlen//2)
+            zind = int(math.floor(z / elementSizeZ)) + zlen // 2
             if (0 <= xind < xlen and 0 <= yind < ylen and 0 <= zind < zlen):
                 return box[xind, yind, zind]
             return 0
 
         @jit(nopython=True)
         def dissipation(x, y, z):                       #Vi omtaler dissipasjon som sannsynlighet for å opphøre i ett enkelt tidssteg.
-            return attenuation(x, y, z) * c * timestep  #Dissipasjonen er dermed gitt med attenuasjonsverdien ganger fotonets forflytning
+            return attenuation(x, y, z) * lengthStep  #Dissipasjonen er dermed gitt med attenuasjonsverdien ganger fotonets forflytning
         cls.dissipation = dissipation
         #cls refererer til class, så her setter vi dissipation-variabelen i speedup til å være dissipation-funksjonen
         #,hvilket for et foton i koordinater (x,y,z) angir sannsynligheten for å opphøre ila. neste tidssteg.
 
 
     @classmethod
-    def reloadJit(cls, box, elementSize=defaultElementSize):
+    def reloadJit(cls, box, elementSizes=defaultElementSizes):
         #Denne funkjsonen kjører man når man vil laste inn et nytt system (en ny numpy-matrise av attenuasjonskoeffisienter)
         #Dersom den aktuelle numpy-matrisen sendes inn som box, vil jitTilHit i speedup redefineres til å simulere ett
         #foton som forflyttes i det nevnte systemet. (Fotonet henter da dissipasjonsverdier fra det nye systemet)
 
-        #elementSize angir størrelsen til hvert element i box.
-        #elementSize brukes kun i reloadDissipation. For en bedre forklaring på denne variabelen, les beskrivelsen der.
+        #elementSizes angir størrelsen til hvert element i box.
+        #elementSizes brukes kun i reloadDissipation. For en bedre forklaring på denne variabelen, les beskrivelsen der.
 
-        cls.reloadDissipation(box, elementSize)      #Definerer først de nye dissipasjonsverdiene
+        cls.reloadDissipation(box, elementSizes)      #Definerer først de nye dissipasjonsverdiene
         dissipation = cls.dissipation   #Og henter disse inn i en lokal dissipation-variabel
-        global c, xLim, yLim, zLim, timestep #Henter ut scenario-verdier fra globalt skop
+        global xLim, yLim, zLim, lengthStep #Henter ut scenario-verdier fra globalt skop
 
         @jit(nopython=True) #Redefinerer jitTilHit, som baserer seg på den nye dissipasjonsvariabelen
         def jitTilHit(planesCoordinates, planesDirection, initialCoordinates, initialDirection, discrete=True):
@@ -77,7 +78,7 @@ class speedup: #En klasse kun for å innkapsle alle jit-funksjoner
             #jitTilHit skyter ut et foton fra sin startposisjon til det enten treffer et plan (og blir absorbert) eller til det havner utenfor
             #systemets grenser (angitt av xLim, yLim og zLim)
 
-            global c, xLim, yLim, zLim, timestep #Henter globale verdier
+            global xLim, yLim, zLim, lengthStep #Henter globale verdier
             probabilisticSurvivalValue = 1.0 #Sannsynligheten for at fotonet når sin startposisjon er 1
             position = initialCoordinates; #Setter posisjon og retningsvariabler
             direction = initialDirection;
@@ -132,9 +133,9 @@ class speedup: #En klasse kun for å innkapsle alle jit-funksjoner
 
                 #Returverdi-betydning er angitt i jitTilHit sin beskrivelse
 
-                position[0] += direction[0] * c * timestep
-                position[1] += direction[1] * c * timestep
-                position[2] += direction[2] * c * timestep
+                position[0] += direction[0] * lengthStep
+                position[1] += direction[1] * lengthStep
+                position[2] += direction[2] * lengthStep
                 #Dersom fotonet enda ikke har skjært gjennom noen plan eller forflyttet seg ut i ulovlige områder, avanserer fotonet
 
         cls.jitTilHit = jitTilHit
