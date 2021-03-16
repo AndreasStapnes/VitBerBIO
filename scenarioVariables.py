@@ -1,34 +1,34 @@
-xLim = (-2.0, 2.0);
-yLim = (-2.0, 2.0);
-zLim = (-2.0, 2.0);
-timestep = 2.6e-11;
-c = 3e8
+xLim = (-2.0, 2.0);                         #Definerer her grensene for hvor
+yLim = (-2.0, 2.0);                         #fotoner tillates å eksistere
+zLim = (-2.0, 2.0);                         #Det er ikke hensiktsmessig å regne på fotoner utenfor dette
+timestep = 1e-11;                           #Definerer timestep
+c = 3e8                                     #Definerer lyshastighet
 
-K1 = 9e9
-K2 = 0.02e9
 
-from numba import jit
+pixelSize = 1 / 128;
+
+obj1_20kev = obj1_50kev = obj1_100kev = obj2_25kev = obj2_50kev = obj2_75kev = test_array = None
+#deklarerer alle objekt-array-ene
+
+loadlist = {"obj1_20kev":"object1_20keV.npy",
+            "obj1_50kev":"object1_50keV.npy",
+            "obj1_100kev":"object1_100keV.npy",
+            "obj2_25kev":"object2_25keV.npy",
+            "obj2_50kev":"object2_50keV.npy",
+            "obj2_75kev":"object2_75keV.npy",
+            "test_array":"test_array.npy"}
 import numpy as np
-import math
-
-with open("data/object1_50keV.npy", "rb") as file:
-    box = np.load(file)
-    box *= 100 #For å gjøre om fra cm^-1 til m^-1
-
-pixelSize = 1/128;
-xlen, ylen, zlen = np.shape(box)
-@jit(nopython=True)
-def dissipationDensity(x,y,z):
-    xind = int(math.floor(x / pixelSize))+xlen//2
-    yind = int(math.floor(y / pixelSize))+ylen//2
-    zind = int(math.floor(z / pixelSize))+zlen//2
-    if(0<=xind<xlen and 0<=yind<ylen and 0<=zind<zlen):
-        return box[xind, yind, zind]
-    return 0
+for object, objectFile in loadlist.items():
+    with open("data/" + objectFile, "rb") as file:
+        globals()[object] = np.load(file) * 100
+                        #Ganger med 100 for å konvertere fra cm^-1 til m^-1
+                        #indeksering av string i globals aksesserer variabelen med string-en som navn
+                        #f.eks globals()["tall"] = 2; er det samme som tall=2
+                        #Vi laster da inn obj1_20kev som np.load("data/object1_20kev.npt") osv.
 
 
 
-@jit(nopython=True)
-def dissipation_density(x,y,z):
-    #return K1*timestep if ((math.sqrt(x**2+z**2)-0.3)**2+y**2<0.0025 and z < 0) or (math.sqrt((abs(x)-0.15)**2+y**2+(z-0.2)**2) < 0.07) else 0;  #Dette er gammel dissipationdensity for testing (lager en smiley)
-    return dissipationDensity(x,y,z)*c*timestep
+
+
+
+
