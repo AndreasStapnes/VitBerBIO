@@ -85,8 +85,8 @@ class plane:
         #Følgende kodeblokk brukes i grunnen ikke i våre løsningsmetoder etter som vi i stor grad baserer oss på ikke-diskrete fotoner
         #men dersom man ønsker å markere (se marker i __init__) kryssende fotoner i et definert plan, er det neste kodeblokk som fikser dette
         #Da denne kodeblokken ikke er brukt, er kommentarene mer vage.
-        if(self.marker):
-            relativeLocationInitial = photon.location - self.location
+        if(self.marker):                                                                        # markering i planes anvendes ikke i prosjekt-løsningen,
+            relativeLocationInitial = photon.location - self.location                           # men er svært brukbar i våre 3d-Monte-Carlo simulasjoner (selv om disse ikke demonstreres)
             planePhotonDistance = dotProd(relativeLocationInitial, self.zeta)                   # Med vektor-algebra-betraktninger finner man her
             requiredTravelDistance = planePhotonDistance/dotProd(photon.direction, self.zeta)   # hvor langt fotonet må flytte seg for å nå planet.
             inPlanePosition = photon.propagate(distance=-requiredTravelDistance);               # Her finner man posisjonen i planet dette svarer til
@@ -141,7 +141,7 @@ class photonSource(plane):                                      #photonSource er
             discreteFotons <- (True eller False).
                         Angir om de genererte fotonene er diskrete (vil enten absorberes eller ikke i hvert tidssteg) eller
                         baserer seg på en statistisk overlevelses-rate-variabel (kan kun absorberes ved plan).
-                        Dersom False vil generatePhotons returnere en 2d-matrise med overlevelses-ratene
+                        Dersom False vil generatePhotons returnere en liste med overlevelses-ratene
                         for hvert foton ved deres forste plan-kollisjon / ved forlatelse av lovlig område. default=True
 
             xiEmissionCoordinates <- (liste av floats)
@@ -229,7 +229,7 @@ class photon:
                                         #bestående av hhv. planenes origo-koordinater og normalvektorer
 
 
-    def __init__(self, location, direction, discreteHits=True):
+    def __init__(self, location, direction, discreteHits=True): #Instansiering av foton
         '''
         foton-klasse
         Instansiering skaper et foton i posisjon location, rettet langs direction.
@@ -241,17 +241,18 @@ class photon:
         self.location = location                    #Henter foton-posisjon
         self.direction = normalize(direction)       #Henter foton-retning
         self.discrete = discreteHits                #Angir hvorvidt fotonet er diskret
+        self.survivalRate = 1.0
 
-    def propagate(self, distance=lengthStep):                   #Funksjon for å forflytte fotonet en gitt avstand. Dersom ingen avstand
-        return self.location + self.direction * distance        #spesifiseres, forflyttes det avstand tilsvarende lyshastighet i timestep tid
+    def propagate(self, distance=lengthStep):                   #Funksjon for å forflytte fotonet en gitt avstand (EN GANG). Dersom ingen avstand
+        return self.location + self.direction * distance        #spesifiseres, forflyttes det avstand tilsvarende default globalt lengthStep
 
     def jitPrimer(self):                                        #Funksjon som forbereder fotonet for transmisjon, og deretter 'avfyrer' det.
         hitPlane, position, probabilisticSurvival = speedup.jitTilHit(photon.planesCoordinates, photon.planesDirections,
-                          self.location, self.direction, self.discrete)
+                          self.location, self.direction, self.discrete, self.survivalRate)
                                                                 #Henter bool hitPlane, (x,y,z) position og float probabilisticSurvival fra jitTilHit i speedup-klassen
                                                                 #Merk at jitTilHit kun kan returnere dersom fotonet
-                                                        #(1): treffer et plan       -> hitPlane = True & Det finnes et plan som fotonet krysset i forrige timestep
-                                                        #(2): kommer utenfor        -> hitPlane = False
+                                                        #(1): treffer et plan                -> hitPlane = True & Det finnes et plan som fotonet krysset i forrige timestep
+                                                        #(2): kommer utenfor lovlige grense  -> hitPlane = False
                                                         #(3): er diskret og blir absorbert i mediet -> hitPlane = False
 
         if not hitPlane:                                #Her håndterer man (2) & (3)
@@ -260,11 +261,12 @@ class photon:
 
         self.location = position                        #Sett fotones posisjon til returverdien av jitTilHit
         for plane in photon.planes:                         #Sjekker gjennom alle plan for å finne det fotonet traff
-            if(plane <= self):                              #Sjekker om fotonet traff (se plane.__lt__)
+            if(plane <= self):                              #Sjekker om fotonet traff plane (se plane.__lt__)
                 if(plane < self):                           #Marker treff-punktet i planet fotonet traff. plane<self returnerer sann dersom plane sin opacity er opaque
                     del self                                #Dersom plan opaque, slett fotonet (det blir absorbert)
                 else:                                       #Hvis ikke, avfyr fotonet igjen (rekursivt) til det omsider havner utenfor lovlig område eller treffer opaque plan
-                    position, probabilisticSurvival = self.jitPrimer()
+                    self.survivalRate = probabilisticSurvival
+                    position, probabilisticSurvival = self.jitPrimer() #Inkluder ny survival-rate
                 return position, probabilisticSurvival
 
         #Funksjonen burde aldri komme her. Dersom det hadde vært tilfellet, hadde jit påstått det finnes et plan som fotonet skjærer,

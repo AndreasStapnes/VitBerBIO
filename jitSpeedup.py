@@ -64,7 +64,7 @@ class speedup: #En klasse kun for å innkapsle alle jit-funksjoner
         global xLim, yLim, zLim, lengthStep #Henter ut scenario-verdier fra globalt skop
 
         @jit(nopython=True) #Redefinerer jitTilHit, som baserer seg på den nye dissipasjonsvariabelen
-        def jitTilHit(planesCoordinates, planesDirection, initialCoordinates, initialDirection, discrete=True):
+        def jitTilHit(planesCoordinates, planesDirection, initialCoordinates, initialDirection, discrete=True, initialSurvivalRate = 1.0):
             '''
             :param planesCoordinates: En liste (ett element for hvert plan) av 3-tupler som består av (x,y,z)-koordinater som det aktuelle plan krysser
             :param planesDirection: En liste (ett element for hver plan) av 3-typler som består av (x,y,z)-koordinater for enhets-normalvektor til det aktuelle planet
@@ -79,7 +79,7 @@ class speedup: #En klasse kun for å innkapsle alle jit-funksjoner
             #systemets grenser (angitt av xLim, yLim og zLim)
 
             global xLim, yLim, zLim, lengthStep #Henter globale verdier
-            probabilisticSurvivalValue = 1.0 #Sannsynligheten for at fotonet når sin startposisjon er 1
+            probabilisticSurvivalValue = initialSurvivalRate #Sannsynligheten for at fotonet når sin startposisjon er 1
             position = initialCoordinates; #Setter posisjon og retningsvariabler
             direction = initialDirection;
 

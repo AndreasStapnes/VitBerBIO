@@ -47,13 +47,17 @@ def expose(i):
     normal = r
     basis = [crossProd(r, np.array([0,0,1])), np.array([0,0,1]), normal]
     pl = plane(location=r, direction=normal, basis=basis, marker=False)
+    pl2 = plane(location = r*0.9, direction=normal, basis=basis, marker=False, opacity="transparent")
     photon.planes.append(pl);
+    photon.planes.append(pl2)
     photon.updatePlanes()
     phPl = photonSource(location=-r, direction=normal, basis=basis)
     probabilityGrid = phPl.generatePhotons(random=False, discretePhotons=False, xiEmissionCoordinates=xis, etaEmissionCoordinates=etas)
     dots.set_array(probabilityGrid)
     photon.planes.pop()
+    photon.planes.pop()
     del pl
+    del pl2
     return dots
 
 mpl.rcParams['animation.ffmpeg_path'] = r"../../ffmpegLibFiler/bin/ffmpeg.exe";
